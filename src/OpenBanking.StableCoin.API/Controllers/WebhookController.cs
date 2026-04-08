@@ -107,10 +107,18 @@ public sealed class WebhookController : ControllerBase
     private async Task HandleOrderFilledAsync(JsonElement root, CancellationToken ct)
     {
         var orderId = GetString(root, "order_id");
-        if (orderId == null) return;
+        if (orderId == null)
+        {
+            _logger.LogWarning("Webhook order.filled missing order_id field");
+            return;
+        }
 
         var order = await _orderRepo.GetByCoinbaseOrderIdAsync(orderId, ct);
-        if (order == null) return;
+        if (order == null)
+        {
+            _logger.LogWarning("Webhook order.filled: order {CoinbaseOrderId} not found in database", orderId);
+            return;
+        }
 
         order.UpdateStatus(
             OrderStatus.Filled,
@@ -127,10 +135,19 @@ public sealed class WebhookController : ControllerBase
     private async Task HandleOrderCancelledAsync(JsonElement root, CancellationToken ct)
     {
         var orderId = GetString(root, "order_id");
-        if (orderId == null) return;
+        if (orderId == null)
+        {
+            _logger.LogWarning("Webhook order.cancelled missing order_id field");
+            return;
+        }
 
         var order = await _orderRepo.GetByCoinbaseOrderIdAsync(orderId, ct);
-        if (order == null || order.IsTerminal) return;
+        if (order == null)
+        {
+            _logger.LogWarning("Webhook order.cancelled: order {CoinbaseOrderId} not found in database", orderId);
+            return;
+        }
+        if (order.IsTerminal) return;
 
         order.UpdateStatus(OrderStatus.Cancelled, rawResponse: root.GetRawText());
         await _orderRepo.UpdateAsync(order, ct);
@@ -140,10 +157,18 @@ public sealed class WebhookController : ControllerBase
     private async Task HandleTransferCompletedAsync(JsonElement root, CancellationToken ct)
     {
         var transferId = GetString(root, "id");
-        if (transferId == null) return;
+        if (transferId == null)
+        {
+            _logger.LogWarning("Webhook transfer.completed missing id field");
+            return;
+        }
 
         var transfer = await _transferRepo.GetByCoinbaseTransferIdAsync(transferId, ct);
-        if (transfer == null) return;
+        if (transfer == null)
+        {
+            _logger.LogWarning("Webhook transfer.completed: transfer {CoinbaseTransferId} not found in database", transferId);
+            return;
+        }
 
         var txHash = GetString(root, "network.hash") ?? GetString(root, "transaction_hash") ?? string.Empty;
         transfer.MarkConfirmed(txHash);
@@ -154,10 +179,18 @@ public sealed class WebhookController : ControllerBase
     private async Task HandleTransferFailedAsync(JsonElement root, CancellationToken ct)
     {
         var transferId = GetString(root, "id");
-        if (transferId == null) return;
+        if (transferId == null)
+        {
+            _logger.LogWarning("Webhook transfer.failed missing id field");
+            return;
+        }
 
         var transfer = await _transferRepo.GetByCoinbaseTransferIdAsync(transferId, ct);
-        if (transfer == null) return;
+        if (transfer == null)
+        {
+            _logger.LogWarning("Webhook transfer.failed: transfer {CoinbaseTransferId} not found in database", transferId);
+            return;
+        }
 
         var reason = GetString(root, "status_reason") ?? "Transfer failed";
         transfer.MarkFailed(reason);

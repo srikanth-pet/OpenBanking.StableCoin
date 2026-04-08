@@ -40,15 +40,22 @@ public sealed class StablecoinWalletService : IStablecoinWalletService
     public async Task<ServiceResult<WalletBalanceResponse>> GetBalanceAsync(
         string customerId, CancellationToken ct = default)
     {
+        _logger.LogDebug("GetBalance: CustomerId={CustomerId}", customerId);
+
         var wallet = await _walletRepo.GetByCustomerIdAsync(customerId, ct);
         if (wallet == null)
+        {
+            _logger.LogWarning("GetBalance: wallet not found for CustomerId={CustomerId}", customerId);
             return ServiceResult<WalletBalanceResponse>.NotFound(
                 "No wallet found for customer.", "WALLET_NOT_FOUND");
+        }
 
         try
         {
             var balance = await _cdpClient.GetBalanceAsync(wallet.CoinbaseWalletId, "USDC", ct);
             var amount = decimal.TryParse(balance.Data?.Amount, out var a) ? a : 0m;
+
+            _logger.LogDebug("Balance fetched: CustomerId={CustomerId} Amount={Amount} USDC", customerId, amount);
 
             return ServiceResult<WalletBalanceResponse>.Success(new WalletBalanceResponse(
                 AssetId: "USDC",
@@ -62,8 +69,13 @@ public sealed class StablecoinWalletService : IStablecoinWalletService
         }
         catch (CoinbaseApiException ex)
         {
-            _logger.LogError(ex, "Failed to fetch balance for CustomerId {CustomerId}", customerId);
+            _logger.LogError(ex, "Failed to fetch balance for CustomerId={CustomerId}", customerId);
             return ServiceResult<WalletBalanceResponse>.Failure(ex.ErrorCode, ex.Message, ex.HttpStatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error fetching balance for CustomerId={CustomerId}", customerId);
+            throw;
         }
     }
 
@@ -172,8 +184,12 @@ public sealed class StablecoinWalletService : IStablecoinWalletService
     public async Task<ServiceResult<PagedResult<TransactionHistoryResponse>>> GetTransactionHistoryAsync(
         string customerId, PaginationRequest request, CancellationToken ct = default)
     {
+        _logger.LogDebug("GetTransactionHistory: CustomerId={CustomerId} PageSize={PageSize}", customerId, request.PageSize);
+
         var (items, totalCount, nextCursor) = await _transferRepo.ListByCustomerAsync(
             customerId, request.PageSize, request.Cursor, ct);
+
+        _logger.LogDebug("GetTransactionHistory returned {Count} of {Total} for CustomerId={CustomerId}", items.Count(), totalCount, customerId);
 
         return ServiceResult<PagedResult<TransactionHistoryResponse>>.Success(
             new PagedResult<TransactionHistoryResponse>

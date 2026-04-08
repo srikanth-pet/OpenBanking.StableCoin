@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenBanking.StableCoin.Infrastructure.Configuration;
 using Org.BouncyCastle.Crypto.Parameters;
@@ -17,10 +18,14 @@ public interface ICoinbaseJwtTokenGenerator
 public sealed class CoinbaseJwtTokenGenerator : ICoinbaseJwtTokenGenerator
 {
     private readonly CoinbaseOptions _options;
+    private readonly ILogger<CoinbaseJwtTokenGenerator> _logger;
 
-    public CoinbaseJwtTokenGenerator(IOptions<CoinbaseOptions> options)
+    public CoinbaseJwtTokenGenerator(
+        IOptions<CoinbaseOptions> options,
+        ILogger<CoinbaseJwtTokenGenerator> logger)
     {
         _options = options.Value;
+        _logger = logger;
     }
 
     public string GenerateToken(string requestMethod, string requestHost, string requestPath)
@@ -28,6 +33,8 @@ public sealed class CoinbaseJwtTokenGenerator : ICoinbaseJwtTokenGenerator
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var uri = $"{requestMethod.ToUpperInvariant()} {requestHost}{requestPath}";
+
+        _logger.LogDebug("Generating Coinbase JWT for {Method} {Uri}", requestMethod.ToUpperInvariant(), uri);
 
         var header = new Dictionary<string, object>
         {
@@ -49,14 +56,35 @@ public sealed class CoinbaseJwtTokenGenerator : ICoinbaseJwtTokenGenerator
         var payloadB64 = Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(payload));
         var signingInput = $"{headerB64}.{payloadB64}";
 
-        var privateKey = LoadEd25519PrivateKey(_options.PrivateKeyPem);
-        var signer = new Ed25519Signer();
-        signer.Init(true, privateKey);
-        var signingBytes = Encoding.UTF8.GetBytes(signingInput);
-        signer.BlockUpdate(signingBytes, 0, signingBytes.Length);
-        var signature = signer.GenerateSignature();
+        Ed25519PrivateKeyParameters privateKey;
+        try
+        {
+            privateKey = LoadEd25519PrivateKey(_options.PrivateKeyPem);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to load Ed25519 private key from PEM. Ensure Coinbase:PrivateKeyPem is set correctly. " +
+                "Key name: {ApiKeyName}", _options.ApiKeyName);
+            throw;
+        }
 
-        return $"{signingInput}.{Base64UrlEncode(signature)}";
+        try
+        {
+            var signer = new Ed25519Signer();
+            signer.Init(true, privateKey);
+            var signingBytes = Encoding.UTF8.GetBytes(signingInput);
+            signer.BlockUpdate(signingBytes, 0, signingBytes.Length);
+            var signature = signer.GenerateSignature();
+
+            _logger.LogDebug("Coinbase JWT generated successfully for key {ApiKeyName}", _options.ApiKeyName);
+            return $"{signingInput}.{Base64UrlEncode(signature)}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to sign Coinbase JWT for key {ApiKeyName}", _options.ApiKeyName);
+            throw;
+        }
     }
 
     private static Ed25519PrivateKeyParameters LoadEd25519PrivateKey(string pem)

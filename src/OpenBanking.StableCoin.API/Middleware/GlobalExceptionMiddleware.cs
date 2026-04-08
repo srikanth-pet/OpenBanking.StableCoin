@@ -37,6 +37,9 @@ public sealed class GlobalExceptionMiddleware
     private async Task HandleExceptionAsync(HttpContext context, Exception ex)
     {
         var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+        var method = context.Request.Method;
+        var path = context.Request.Path;
+        var customerId = context.User.FindFirst("customer_id")?.Value ?? "anonymous";
 
         var (statusCode, errorCode, title, detail) = ex switch
         {
@@ -48,9 +51,13 @@ public sealed class GlobalExceptionMiddleware
         };
 
         if (statusCode == HttpStatusCode.InternalServerError)
-            _logger.LogError(ex, "Unhandled exception. TraceId: {TraceId}", traceId);
+            _logger.LogError(ex,
+                "Unhandled {ExceptionType} on {Method} {Path} for CustomerId={CustomerId}. TraceId={TraceId}",
+                ex.GetType().Name, method, path, customerId, traceId);
         else
-            _logger.LogWarning(ex, "Business exception {ErrorCode}. TraceId: {TraceId}", errorCode, traceId);
+            _logger.LogWarning(ex,
+                "Business exception {ErrorCode} ({ExceptionType}) on {Method} {Path} for CustomerId={CustomerId}. TraceId={TraceId}",
+                errorCode, ex.GetType().Name, method, path, customerId, traceId);
 
         var response = new ApiErrorResponse
         {
@@ -64,6 +71,7 @@ public sealed class GlobalExceptionMiddleware
 
         context.Response.StatusCode = (int)statusCode;
         context.Response.ContentType = "application/problem+json";
+        context.Response.Headers["X-Trace-Id"] = traceId;
         await context.Response.WriteAsync(JsonSerializer.Serialize(response, JsonOpts));
     }
 }

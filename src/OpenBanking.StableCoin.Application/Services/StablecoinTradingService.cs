@@ -34,12 +34,17 @@ public sealed class StablecoinTradingService : IStablecoinTradingService
     public async Task<ServiceResult<PriceQuoteResponse>> GetPriceQuoteAsync(
         string customerId, PriceQuoteRequest request, CancellationToken ct = default)
     {
+        _logger.LogDebug("GetPriceQuote: CustomerId={CustomerId} ProductId={ProductId} Side={Side}",
+            customerId, request.ProductId, request.Side);
         try
         {
             var product = await _coinbase.GetProductAsync(request.ProductId, ct);
             var bestBid = decimal.Parse(product.BestBid);
             var bestAsk = decimal.Parse(product.BestAsk);
             var effectivePrice = request.Side == OrderSide.Buy ? bestAsk : bestBid;
+
+            _logger.LogDebug("Price quote: BestBid={BestBid} BestAsk={BestAsk} Effective={Effective}",
+                bestBid, bestAsk, effectivePrice);
 
             return ServiceResult<PriceQuoteResponse>.Success(new PriceQuoteResponse(
                 ProductId: request.ProductId,
@@ -53,14 +58,23 @@ public sealed class StablecoinTradingService : IStablecoinTradingService
         }
         catch (CoinbaseApiException ex)
         {
-            _logger.LogWarning(ex, "Coinbase API error getting price quote for {ProductId}", request.ProductId);
+            _logger.LogWarning(ex, "Coinbase API error getting price quote for {ProductId} CustomerId={CustomerId}",
+                request.ProductId, customerId);
             return ServiceResult<PriceQuoteResponse>.Failure(ex.ErrorCode, ex.Message, ex.HttpStatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error getting price quote for {ProductId} CustomerId={CustomerId}",
+                request.ProductId, customerId);
+            throw;
         }
     }
 
     public async Task<ServiceResult<OrderPreviewResponse>> PreviewOrderAsync(
         string customerId, OrderPreviewRequest request, CancellationToken ct = default)
     {
+        _logger.LogDebug("PreviewOrder: CustomerId={CustomerId} ProductId={ProductId} Side={Side} QuoteSize={QuoteSize}",
+            customerId, request.ProductId, request.Side, request.QuoteSize);
         try
         {
             var cbRequest = new CbOrderPreviewRequest
@@ -73,12 +87,17 @@ public sealed class StablecoinTradingService : IStablecoinTradingService
             var preview = await _coinbase.PreviewOrderAsync(cbRequest, ct);
 
             if (!string.IsNullOrEmpty(preview.PreviewFailureReason))
+            {
+                _logger.LogWarning("Order preview rejected: {Reason} CustomerId={CustomerId}", preview.PreviewFailureReason, customerId);
                 return ServiceResult<OrderPreviewResponse>.Failure(
                     "PREVIEW_FAILED", preview.PreviewFailureReason);
+            }
 
             var slippage = decimal.TryParse(preview.Slippage, out var s) ? s : 0m;
             var bestBid = decimal.Parse(preview.BestBid);
             var bestAsk = decimal.Parse(preview.BestAsk);
+
+            _logger.LogDebug("Order preview succeeded: Commission={Commission} Slippage={Slippage}", preview.CommissionTotal, slippage);
 
             return ServiceResult<OrderPreviewResponse>.Success(new OrderPreviewResponse(
                 BaseSize: decimal.Parse(preview.BaseSize),
@@ -92,7 +111,13 @@ public sealed class StablecoinTradingService : IStablecoinTradingService
         }
         catch (CoinbaseApiException ex)
         {
+            _logger.LogWarning(ex, "Coinbase API error previewing order for CustomerId={CustomerId}", customerId);
             return ServiceResult<OrderPreviewResponse>.Failure(ex.ErrorCode, ex.Message, ex.HttpStatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error previewing order for CustomerId={CustomerId}", customerId);
+            throw;
         }
     }
 
@@ -198,10 +223,15 @@ public sealed class StablecoinTradingService : IStablecoinTradingService
     public async Task<ServiceResult<PagedResult<OrderStatusResponse>>> ListOrdersAsync(
         string customerId, OrderListRequest request, CancellationToken ct = default)
     {
+        _logger.LogDebug("ListOrders: CustomerId={CustomerId} Side={Side} Status={Status} PageSize={PageSize}",
+            customerId, request.Side, request.Status, request.PageSize);
+
         var (items, totalCount, nextCursor) = await _orderRepo.ListByCustomerAsync(
             customerId, request.Side, request.Status,
             request.FromDate, request.ToDate,
             request.PageSize, request.Cursor, ct);
+
+        _logger.LogDebug("ListOrders returned {Count} of {Total} for CustomerId={CustomerId}", items.Count(), totalCount, customerId);
 
         return ServiceResult<PagedResult<OrderStatusResponse>>.Success(new PagedResult<OrderStatusResponse>
         {

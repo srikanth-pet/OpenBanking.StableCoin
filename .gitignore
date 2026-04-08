@@ -1,0 +1,44 @@
+# Build results
+bin/
+obj/
+out/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+project.assets.json
+.nuget/
+
+# dotnet
+*.swp
+*.*~
+project.lock.json
+.DS_Store
+*.pyc
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# Test results
+TestResults/
+coverage/
+*.coveragexml
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
